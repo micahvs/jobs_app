@@ -10,11 +10,11 @@ class Config:
     SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(basedir, 'app.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # Security
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-jwt-secret-key')
+    # Security - Using simple consistent keys for development
+    SECRET_KEY = 'dev-secret-key'
+    JWT_SECRET_KEY = 'dev-secret-key'  # Using the same key for simplicity
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     
-    # CORS settings for frontend
-    CORS_HEADERS = 'Content-Type'
+    # Explicitly allow all origins for testing
+    CORS_HEADERS = ['Content-Type', 'Authorization']

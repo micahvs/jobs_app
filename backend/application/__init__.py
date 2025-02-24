@@ -15,21 +15,20 @@ def create_app(config_class=Config):
     
     # Initialize extensions
     db.init_app(app)
-    migrate.init_app(app)
+    migrate.init_app(app, db)
     jwt.init_app(app)
     
-    # Very permissive CORS - for debugging only
-    CORS(app, resources={
-        r"/*": {
-            "origins": "*",
-            "methods": ["*"],
-            "allow_headers": ["*"]
-        }
-    })
+    # Configure CORS
+    CORS(app, resources={r"/*": {"origins": "*"}})
     
-    @app.route('/test', methods=['GET'])
-    def test():
-        return {'message': 'test'}
+    # Register blueprints
+    from application.routes.auth import bp as auth_bp
+    from application.routes.jobs import bp as jobs_bp
+    from application.routes.swipes import bp as swipes_bp
+    
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(jobs_bp)
+    app.register_blueprint(swipes_bp)
     
     @app.route('/health')
     def health_check():

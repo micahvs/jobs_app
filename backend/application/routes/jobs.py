@@ -1,10 +1,21 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_cors import cross_origin
 from application import db
 from application.models.job import Job
 from datetime import datetime, timedelta
 
 bp = Blueprint('jobs', __name__, url_prefix='/api/jobs')
+
+@bp.after_request
+def after_request(response):
+    print(f"After request: {request.method} {request.path}")
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    print(f"Response headers: {dict(response.headers)}")
+    return response
 
 def validate_job_data(data, required_fields=None):
     if required_fields is None:
@@ -21,15 +32,49 @@ def validate_job_data(data, required_fields=None):
     
     return None
 
+@bp.route('/', methods=['OPTIONS'])
+@cross_origin()
+def handle_options():
+    print("OPTIONS request received")
+    return '', 200
+
+@bp.route('/', methods=['GET'])
+@jwt_required()
+def get_jobs():
+    print("GET /jobs endpoint called")
+    try:
+        current_user_id = get_jwt_identity()
+        print(f"User ID from token: {current_user_id}")
+        
+        # Get query parameters
+        is_active = request.args.get('active', 'true').lower() == 'true'
+        print(f"Fetching jobs with is_active={is_active}")
+        
+        jobs = Job.query.filter_by(
+            employer_id=current_user_id,
+            is_active=is_active
+        ).order_by(Job.created_at.desc()).all()
+        
+        result = [job.to_dict() for job in jobs]
+        print(f"Found {len(result)} jobs")
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"Error in get_jobs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @bp.route('/', methods=['POST'])
 @jwt_required()
 def create_job():
+    print("POST /jobs endpoint called")
     current_user_id = get_jwt_identity()
     data = request.get_json()
+    print(f"Received job data: {data}")
     
     # Validate required fields
     validation_error = validate_job_data(data)
     if validation_error:
+        print(f"Validation error: {validation_error}")
         return validation_error
     
     try:
@@ -62,48 +107,40 @@ def create_job():
         
         db.session.add(job)
         db.session.commit()
+        print(f"Created job with ID: {job.id}")
         
         return jsonify(job.to_dict()), 201
         
     except Exception as e:
         db.session.rollback()
+        print(f"Error creating job: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-@bp.route('/', methods=['GET'])
-@jwt_required()
-def get_jobs():
-    current_user_id = get_jwt_identity()
-    
-    # Get query parameters
-    is_active = request.args.get('active', 'true').lower() == 'true'
-    
-    jobs = Job.query.filter_by(
-        employer_id=current_user_id,
-        is_active=is_active
-    ).order_by(Job.created_at.desc()).all()
-    
-    return jsonify([job.to_dict() for job in jobs])
 
 @bp.route('/<int:job_id>', methods=['GET'])
 @jwt_required()
 def get_job(job_id):
+    print(f"GET /jobs/{job_id} endpoint called")
     job = Job.query.get_or_404(job_id)
     return jsonify(job.to_dict())
 
 @bp.route('/<int:job_id>', methods=['PUT'])
 @jwt_required()
 def update_job(job_id):
+    print(f"PUT /jobs/{job_id} endpoint called")
     current_user_id = get_jwt_identity()
     job = Job.query.get_or_404(job_id)
     
     if job.employer_id != current_user_id:
+        print(f"Unauthorized update attempt by user {current_user_id}")
         return jsonify({'error': 'Unauthorized'}), 403
         
     data = request.get_json()
+    print(f"Update data: {data}")
     
     # Validate updates
     validation_error = validate_job_data(data, required_fields=[])
     if validation_error:
+        print(f"Validation error: {validation_error}")
         return validation_error
     
     try:
@@ -118,35 +155,60 @@ def update_job(job_id):
                 setattr(job, key, value)
                 
         db.session.commit()
+        print(f"Successfully updated job {job_id}")
         return jsonify(job.to_dict())
         
     except Exception as e:
         db.session.rollback()
+        print(f"Error updating job: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/<int:job_id>/deactivate', methods=['POST'])
 @jwt_required()
 def deactivate_job(job_id):
+    print(f"POST /jobs/{job_id}/deactivate endpoint called")
     current_user_id = get_jwt_identity()
     job = Job.query.get_or_404(job_id)
     
     if job.employer_id != current_user_id:
+        print(f"Unauthorized deactivation attempt by user {current_user_id}")
         return jsonify({'error': 'Unauthorized'}), 403
     
     job.is_active = False
     db.session.commit()
+    print(f"Successfully deactivated job {job_id}")
     
     return jsonify({'message': 'Job deactivated successfully'})
+
+@bp.route('/feed', methods=['GET'])
+@jwt_required()
+def get_job_feed():
+    print("GET /jobs/feed endpoint called")
+    current_user_id = get_jwt_identity()
+    
+    # Get jobs that:
+    # 1. Are active
+    # 2. Haven't expired
+    # 3. Haven't been swiped on by this user
+    jobs = Job.query.filter(
+        Job.is_active == True,
+        Job.expires_at > datetime.utcnow()
+    ).order_by(Job.created_at.desc()).all()
+    
+    print(f"Found {len(jobs)} jobs for feed")
+    return jsonify([job.to_dict() for job in jobs])
 
 @bp.route('/search', methods=['GET'])
 @jwt_required()
 def search_jobs():
-    """Search jobs with filters"""
+    print("GET /jobs/search endpoint called")
     # Get search parameters
     role_type = request.args.get('role_type')
     location = request.args.get('location')
     remote_type = request.args.get('remote_type')
     min_salary = request.args.get('min_salary', type=int)
+    
+    print(f"Search parameters: role_type={role_type}, location={location}, remote_type={remote_type}, min_salary={min_salary}")
     
     # Build query
     query = Job.query.filter(
@@ -164,22 +226,5 @@ def search_jobs():
         query = query.filter(Job.salary_max >= min_salary)
     
     jobs = query.order_by(Job.created_at.desc()).all()
-    return jsonify([job.to_dict() for job in jobs])
-
-@bp.route('/feed', methods=['GET'])
-@jwt_required()
-def get_job_feed():
-    """Get jobs for candidate feed"""
-    current_user_id = get_jwt_identity()
-    
-    # Get jobs that:
-    # 1. Are active
-    # 2. Haven't expired
-    # 3. Haven't been swiped on by this user
-    jobs = Job.query.filter(
-        Job.is_active == True,
-        Job.expires_at > datetime.utcnow(),
-        ~Job.swipes.any(user_id=current_user_id)  # We'll add this relationship
-    ).order_by(Job.created_at.desc()).all()
-    
+    print(f"Found {len(jobs)} jobs matching search criteria")
     return jsonify([job.to_dict() for job in jobs])

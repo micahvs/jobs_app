@@ -7,6 +7,8 @@ app = create_app()
 # Allow CORS for React frontend
 CORS(app, supports_credentials=True, origins="http://localhost:3000")
 
+
+
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     data = request.json
